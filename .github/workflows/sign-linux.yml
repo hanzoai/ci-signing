@@ -1,0 +1,69 @@
+name: sign-linux
+# Reusable, SIGN-ONLY: GPG-sign prebuilt Linux artifacts (from your build job's artifact).
+# Produces detached .asc + SHA256SUMS (+ optional keyless cosign). Linux signing = GPG.
+on:
+  workflow_call:
+    inputs:
+      artifact-name:  { type: string,  required: true }    # build job's uploaded artifact
+      artifacts-glob: { type: string,  default: '*' }       # within the downloaded dir (e.g. "*.AppImage *.deb")
+      cosign-blobs:   { type: boolean, default: false }
+      runs-on:        { type: string,  default: '["self-hosted","Linux","X64"]' }
+    secrets:
+      GPG_PRIVATE_KEY: { required: true }   # armored private key, base64-encoded
+      GPG_PASSPHRASE:  { required: true }
+
+jobs:
+  sign:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          KEYID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $5; exit}')"
+          test -n "$KEYID" || { echo "::error::no secret key imported"; exit 1; }
+          echo "GPG_KEYID=$KEYID" >> "$GITHUB_ENV"
+
+      - name: Detached signatures + checksums
+        working-directory: dist
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          : > SHA256SUMS
+          for f in ${{ inputs.artifacts-glob }}; do
+            [ -e "$f" ] || continue
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+                --local-user "$GPG_KEYID" --armor --detach-sign --output "$f.asc" "$f"
+            sha256sum "$f" >> SHA256SUMS
+          done
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --local-user "$GPG_KEYID" --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+          gpg --armor --export "$GPG_KEYID" > signing-pubkey.asc
+
+      - name: Keyless cosign (optional)
+        if: ${{ inputs.cosign-blobs }}
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          command -v cosign >/dev/null || { echo "::error::cosign not on runner"; exit 1; }
+          for f in ${{ inputs.artifacts-glob }}; do [ -e "$f" ] || continue
+            cosign sign-blob --yes --output-signature "$f.cosig" --output-certificate "$f.pem" "$f"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-signatures
+          path: |
+            dist/**/*.asc
+            dist/SHA256SUMS
+            dist/signing-pubkey.asc
+            dist/**/*.cosig
+            dist/**/*.pem
+          if-no-files-found: warn

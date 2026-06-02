@@ -1,0 +1,86 @@
+name: sign-macos
+# Reusable, SIGN-ONLY: take a prebuilt .app (from your build job's artifact), Developer ID sign +
+# notarize + staple, emit a notarized .dmg. Runs on the native macOS runner.
+on:
+  workflow_call:
+    inputs:
+      artifact-name: { type: string, required: true }   # artifact uploaded by your build job (contains the .app)
+      app-name:      { type: string, required: true }    # e.g. App.app
+      make-dmg:      { type: boolean, default: true }
+      runs-on:       { type: string, default: '["self-hosted","macOS","ARM64"]' }
+    secrets:
+      CERT_P12_BASE64:       { required: true }
+      CERT_PASSWORD:         { required: true }
+      ASC_API_KEY_P8_BASE64: { required: true }
+      ASC_API_KEY_ID:        { required: true }
+      ASC_API_ISSUER_ID:     { required: true }
+      TEAM_ID:               { required: true }
+
+jobs:
+  sign:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/in
+
+      - name: Import Developer ID cert into a throwaway keychain
+        env:
+          CERT_P12_BASE64: ${{ secrets.CERT_P12_BASE64 }}
+          CERT_PASSWORD:   ${{ secrets.CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/sign-$$.keychain-db"; KCPASS="$(openssl rand -hex 24)"
+          security create-keychain -p "$KCPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
+          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          ID="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+          test -n "$ID" || { echo "::error::no Developer ID Application identity in the .p12"; exit 1; }
+          { echo "KEYCHAIN=$KEYCHAIN"; echo "SIGN_IDENTITY=$ID"; } >> "$GITHUB_ENV"
+
+      - name: Codesign (hardened runtime)
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/in/${{ inputs.app-name }}"
+          codesign --force --deep --timestamp --options runtime --keychain "$KEYCHAIN" --sign "$SIGN_IDENTITY" "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          NAME="$(basename "${{ inputs.app-name }}" .app)"
+          if ${{ inputs.make-dmg }}; then
+            hdiutil create -volname "$NAME" -srcfolder "$APP" -ov -format UDZO "$RUNNER_TEMP/$NAME.dmg"
+            echo "ARTIFACT=$RUNNER_TEMP/$NAME.dmg" >> "$GITHUB_ENV"
+          else
+            ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/$NAME.zip"
+            echo "ARTIFACT=$RUNNER_TEMP/$NAME.zip" >> "$GITHUB_ENV"
+          fi
+
+      - name: Notarize + staple
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_API_KEY_ID:        ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID:     ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/asc.p8"
+          xcrun notarytool submit "$ARTIFACT" --key "$RUNNER_TEMP/asc.p8" \
+            --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID" --wait --timeout 30m
+          rm -f "$RUNNER_TEMP/asc.p8"
+          if [[ "$ARTIFACT" == *.zip ]]; then xcrun stapler staple "$APP"; else xcrun stapler staple "$ARTIFACT"; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-signed
+          path: ${{ env.ARTIFACT }}
+
+      - if: always()
+        run: security delete-keychain "$KEYCHAIN" 2>/dev/null || true

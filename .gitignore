@@ -1,0 +1,9 @@
+# never commit local credential material
+secrets/
+*.p12
+*.p8
+*.jks
+*.keystore
+*.mobileprovision
+*.asc
+play-service-account.json
