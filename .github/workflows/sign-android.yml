@@ -1,0 +1,67 @@
+name: sign-android
+# Reusable, SIGN-ONLY: sign a prebuilt UNSIGNED .aab/.apk (from your build job's artifact) with your
+# upload keystore, optional Play upload. Your Gradle build runs in the app repo; this only signs.
+# (Keystore = your UPLOAD key; Play App Signing re-signs with the app key Google holds.)
+on:
+  workflow_call:
+    inputs:
+      artifact-name: { type: string,  required: true }     # build job's uploaded unsigned artifact
+      file-glob:     { type: string,  default: '*.aab' }    # *.aab (jarsigner) or *.apk (apksigner)
+      upload-play:   { type: boolean, default: false }
+      package-name:  { type: string,  default: '' }
+      track:         { type: string,  default: 'internal' }
+      runs-on:       { type: string,  default: '["self-hosted","Linux","X64"]' }
+    secrets:
+      KEYSTORE_BASE64:           { required: true }
+      KEYSTORE_PASSWORD:         { required: true }
+      KEY_ALIAS:                 { required: true }
+      KEY_PASSWORD:              { required: true }
+      PLAY_SERVICE_ACCOUNT_JSON: { required: false }
+
+jobs:
+  sign:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }   # jarsigner
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+
+      - name: Sign
+        working-directory: dist
+        env:
+          KEYSTORE_BASE64:   ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KS="$RUNNER_TEMP/upload.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KS"
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+          shopt -s nullglob
+          for f in ${{ inputs.file-glob }}; do
+            case "$f" in
+              *.aab) jarsigner -keystore "$KS" -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" "$f" "$KEY_ALIAS"; jarsigner -verify "$f" ;;
+              *.apk) test -n "$APKSIGNER" || { echo "::error::apksigner not found (need Android build-tools)"; exit 1; }
+                     "$APKSIGNER" sign --ks "$KS" --ks-pass "pass:$KEYSTORE_PASSWORD" --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASSWORD" "$f"
+                     "$APKSIGNER" verify "$f" ;;
+            esac
+            echo "signed $f"
+          done
+
+      - name: Upload to Google Play
+        if: ${{ inputs.upload-play }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ inputs.package-name }}
+          releaseFiles: dist/${{ inputs.file-glob }}
+          track: ${{ inputs.track }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}-signed
+          path: dist/${{ inputs.file-glob }}
