@@ -51,7 +51,7 @@ jobs:
   # ---------------- sign (reusable, sign-only) ----------------
   sign-macos:
     needs: build-macos
-    uses: OWNER/ci-signing/.github/workflows/sign-macos.yml@v1
+    uses: hanzoai/ci-signing/.github/workflows/sign-macos.yml@v1
     with: { artifact-name: macos-app, app-name: App.app, make-dmg: true }
     secrets:
       CERT_P12_BASE64:       ${{ secrets.MACOS_CERT_P12_BASE64 }}
@@ -63,7 +63,7 @@ jobs:
 
   sign-windows:
     needs: build-windows
-    uses: OWNER/ci-signing/.github/workflows/sign-windows.yml@v1
+    uses: hanzoai/ci-signing/.github/workflows/sign-windows.yml@v1
     with:
       artifact-name: windows-build
       account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
@@ -75,7 +75,7 @@ jobs:
 
   sign-linux:
     needs: build-linux
-    uses: OWNER/ci-signing/.github/workflows/sign-linux.yml@v1
+    uses: hanzoai/ci-signing/.github/workflows/sign-linux.yml@v1
     with: { artifact-name: linux-build, artifacts-glob: "*.AppImage *.deb *.tar.gz" }
     secrets:
       GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
@@ -83,7 +83,7 @@ jobs:
 
   sign-ios:
     needs: build-ios
-    uses: OWNER/ci-signing/.github/workflows/sign-ios.yml@v1
+    uses: hanzoai/ci-signing/.github/workflows/sign-ios.yml@v1
     with: { archive-artifact-name: ios-archive, archive-name: App.xcarchive, export-method: app-store, upload-testflight: true }
     secrets:
       DIST_CERT_P12_BASE64:        ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
@@ -96,7 +96,7 @@ jobs:
 
   sign-android:
     needs: build-android
-    uses: OWNER/ci-signing/.github/workflows/sign-android.yml@v1
+    uses: hanzoai/ci-signing/.github/workflows/sign-android.yml@v1
     with:
       artifact-name: android-aab
       file-glob: "*.aab"
