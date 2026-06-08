@@ -1,0 +1,33 @@
+name: publish-chrome
+# Reusable, PUBLISH-ONLY: upload a prebuilt extension .zip to the Chrome Web Store.
+# The SAME package works on all Chromium stores (Edge/Brave/Opera). Google packages + signs it on
+# publish — you don't code-sign extensions. Runs on Linux.
+on:
+  workflow_call:
+    inputs:
+      artifact-name: { type: string,  required: true }    # build job's uploaded .zip
+      zip-name:      { type: string,  default: 'extension.zip' }
+      extension-id:  { type: string,  required: true }
+      publish:       { type: boolean, default: true }      # false = upload as draft only
+      runs-on:       { type: string,  default: '["self-hosted","Linux","X64"]' }
+    secrets:
+      CHROME_CLIENT_ID:     { required: true }
+      CHROME_CLIENT_SECRET: { required: true }
+      CHROME_REFRESH_TOKEN: { required: true }
+
+jobs:
+  publish:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist
+      - uses: mnao305/chrome-extension-upload@v5   # pin to a commit SHA in prod
+        with:
+          file-path:     dist/${{ inputs.zip-name }}
+          extension-id:  ${{ inputs.extension-id }}
+          client-id:     ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          publish:       ${{ inputs.publish }}

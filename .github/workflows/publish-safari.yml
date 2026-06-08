@@ -1,0 +1,84 @@
+name: publish-safari
+# Reusable, SIGN+SUBMIT: a Safari Web Extension ships as a Mac/iOS App Store app. Your build job runs
+# `xcrun safari-web-extension-converter` then `xcodebuild archive` and uploads the .xcarchive; this
+# exports it App-Store-signed (your Apple Distribution cert) and uploads to App Store Connect.
+on:
+  workflow_call:
+    inputs:
+      archive-artifact-name: { type: string, required: true }   # artifact containing the .xcarchive
+      archive-name:          { type: string, default: 'SafariExt.xcarchive' }
+      platform:              { type: string, default: 'macos' }  # macos | ios
+      runs-on:               { type: string, default: '["self-hosted","macOS","ARM64"]' }
+    secrets:
+      DIST_CERT_P12_BASE64:        { required: true }
+      DIST_CERT_PASSWORD:          { required: true }
+      PROVISIONING_PROFILE_BASE64: { required: true }
+      ASC_API_KEY_P8_BASE64:       { required: true }
+      ASC_API_KEY_ID:              { required: true }
+      ASC_API_ISSUER_ID:           { required: true }
+      TEAM_ID:                     { required: true }
+
+jobs:
+  publish:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.archive-artifact-name }}
+          path: ${{ runner.temp }}/ar
+
+      - name: Keychain + cert + provisioning profile
+        env:
+          DIST_CERT_P12_BASE64:        ${{ secrets.DIST_CERT_P12_BASE64 }}
+          DIST_CERT_PASSWORD:          ${{ secrets.DIST_CERT_PASSWORD }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/saf-$$.keychain-db"; KCPASS="$(openssl rand -hex 24)"
+          security create-keychain -p "$KCPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
+          printf '%s' "$DIST_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$KEYCHAIN" -P "$DIST_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/dist.p12"
+          PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"; mkdir -p "$PROFILES"
+          printf '%s' "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILES/saf-$$.mobileprovision"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Export App-Store-signed app
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/ar/${{ inputs.archive-name }}" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates
+
+      - name: Upload to App Store Connect
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_API_KEY_ID:        ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID:     ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.private_keys"
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$HOME/.private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          PKG="$(ls "$RUNNER_TEMP/export/"*.pkg "$RUNNER_TEMP/export/"*.ipa 2>/dev/null | head -1)"
+          xcrun altool --upload-app -t "${{ inputs.platform }}" -f "$PKG" \
+            --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID"
+          rm -f "$HOME/.private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" 2>/dev/null || true
