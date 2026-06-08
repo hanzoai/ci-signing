@@ -4,6 +4,8 @@ Brand-neutral, drop-in **reusable workflows** to build/sign/notarize release art
 **macOS · Windows · Linux · iOS · Android · browser extensions (Chrome / Firefox / Safari)** on self-hosted runners. Fork it into your org, set a
 handful of secrets/vars, and `uses:` the workflows from any repo. No secrets live in this repo.
 
+**Ops setup:** see [`docs/OPS-RUNBOOK.md`](docs/OPS-RUNBOOK.md) — full per-org step-by-step (accounts, certs, `az` commands, secrets loading).
+
 > **Use it:** this repo is **public**, so reference the workflows directly from any org as
 > `hanzoai/ci-signing/.github/workflows/<name>.yml@v1` — no fork needed. (Or click **"Use this
 > template"** to keep a pinned copy in your own org.)
