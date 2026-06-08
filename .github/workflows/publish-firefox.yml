@@ -1,0 +1,42 @@
+name: publish-firefox
+# Reusable, PUBLISH-ONLY: sign + submit a Firefox extension to AMO (addons.mozilla.org).
+# Mozilla signs it — you don't. `listed` submits to the public store; `unlisted` signs for
+# self-distribution. Runs on Linux.
+on:
+  workflow_call:
+    inputs:
+      artifact-name: { type: string, required: true }   # build job's uploaded extension source (zipped)
+      source-subdir: { type: string, default: '.' }       # path to manifest.json within the artifact
+      channel:       { type: string, default: 'listed' }  # listed | unlisted
+      runs-on:       { type: string, default: '["self-hosted","Linux","X64"]' }
+    secrets:
+      AMO_JWT_ISSUER: { required: true }
+      AMO_JWT_SECRET: { required: true }
+
+jobs:
+  publish:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ext
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: web-ext sign (Mozilla-signed .xpi)
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          npx --yes web-ext@latest sign \
+            --channel="${{ inputs.channel }}" \
+            --source-dir="ext/${{ inputs.source-subdir }}" \
+            --api-key="$AMO_JWT_ISSUER" --api-secret="$AMO_JWT_SECRET" \
+            --artifacts-dir=signed
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firefox-xpi
+          path: signed/*.xpi
+          if-no-files-found: warn

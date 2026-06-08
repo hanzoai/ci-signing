@@ -58,4 +58,18 @@ if have "$D/upload.jks"; then
   have "$D/play-service-account.json" && put PLAY_SERVICE_ACCOUNT_JSON "$(cat "$D/play-service-account.json")"
 fi
 
+if have "$D/chrome.env"; then
+  echo "==> $ORG : Chrome Web Store"
+  # shellcheck disable=SC1090
+  source "$D/chrome.env"   # CHROME_CLIENT_ID=  CHROME_CLIENT_SECRET=  CHROME_REFRESH_TOKEN=
+  put CHROME_CLIENT_ID "$CHROME_CLIENT_ID"; put CHROME_CLIENT_SECRET "$CHROME_CLIENT_SECRET"; put CHROME_REFRESH_TOKEN "$CHROME_REFRESH_TOKEN"
+fi
+
+if have "$D/amo.env"; then
+  echo "==> $ORG : Firefox AMO"
+  # shellcheck disable=SC1090
+  source "$D/amo.env"      # AMO_JWT_ISSUER=  AMO_JWT_SECRET=
+  put AMO_JWT_ISSUER "$AMO_JWT_ISSUER"; put AMO_JWT_SECRET "$AMO_JWT_SECRET"
+fi
+
 echo "✅ $ORG secrets loaded"
