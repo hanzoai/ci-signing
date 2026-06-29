@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="ci-signing" width="880"></p>
+
 # ci-signing — omni-platform build & sign for GitHub Actions
 
 Brand-neutral, drop-in **reusable workflows** to build/sign/notarize release artifacts across
