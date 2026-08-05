@@ -1,12 +1,17 @@
 name: sign-linux
 # Reusable, SIGN-ONLY: GPG-sign prebuilt Linux artifacts (from your build job's artifact).
 # Produces detached .asc + SHA256SUMS (+ optional keyless cosign). Linux signing = GPG.
+  # STRING, NOT BOOLEAN: git.hanzo.ai resolves every `type: boolean`
+  # workflow_call input to false, an explicitly passed `true` included
+  # (measured, z/ci-boolinput-probe run 30590), so as booleans these
+  # gates could never be turned on and every opt-in below was a silent
+  # no-op on a green run. Compared against a literal instead.
 on:
   workflow_call:
     inputs:
       artifact-name:  { type: string,  required: true }    # build job's uploaded artifact
       artifacts-glob: { type: string,  default: '*' }       # within the downloaded dir (e.g. "*.AppImage *.deb")
-      cosign-blobs:   { type: boolean, default: false }
+      cosign-blobs:   { type: string,  default: 'false' }
       runs-on:        { type: string,  default: '["self-hosted","Linux","X64"]' }
     secrets:
       GPG_PRIVATE_KEY: { required: true }   # armored private key, base64-encoded
@@ -49,7 +54,7 @@ jobs:
           gpg --armor --export "$GPG_KEYID" > signing-pubkey.asc
 
       - name: Keyless cosign (optional)
-        if: ${{ inputs.cosign-blobs }}
+        if: ${{ inputs.cosign-blobs == 'true' }}
         working-directory: dist
         run: |
           set -euo pipefail

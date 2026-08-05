@@ -1,13 +1,18 @@
 name: sign-ios
 # Reusable, SIGN-ONLY: export a signed .ipa from a prebuilt .xcarchive (your build job runs
 # `xcodebuild archive` and uploads the .xcarchive). This only signs/exports + optional TestFlight.
+  # STRING, NOT BOOLEAN: git.hanzo.ai resolves every `type: boolean`
+  # workflow_call input to false, an explicitly passed `true` included
+  # (measured, z/ci-boolinput-probe run 30590), so as booleans these
+  # gates could never be turned on and every opt-in below was a silent
+  # no-op on a green run. Compared against a literal instead.
 on:
   workflow_call:
     inputs:
       archive-artifact-name: { type: string,  required: true }   # artifact containing the .xcarchive
       archive-name:          { type: string,  default: 'App.xcarchive' }
       export-method:         { type: string,  default: 'app-store' }  # app-store|ad-hoc|development|enterprise
-      upload-testflight:     { type: boolean, default: false }
+      upload-testflight:     { type: string,  default: 'false' }
       runs-on:               { type: string,  default: '["self-hosted","macOS","ARM64"]' }
     secrets:
       DIST_CERT_P12_BASE64:        { required: true }
@@ -66,7 +71,7 @@ jobs:
             -allowProvisioningUpdates
 
       - name: Upload to TestFlight
-        if: ${{ inputs.upload-testflight }}
+        if: ${{ inputs.upload-testflight == 'true' }}
         env:
           ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
           ASC_API_KEY_ID:        ${{ secrets.ASC_API_KEY_ID }}

@@ -1,12 +1,17 @@
 name: sign-macos
 # Reusable, SIGN-ONLY: take a prebuilt .app (from your build job's artifact), Developer ID sign +
 # notarize + staple, emit a notarized .dmg. Runs on the native macOS runner.
+  # STRING, NOT BOOLEAN: git.hanzo.ai resolves every `type: boolean`
+  # workflow_call input to false, an explicitly passed `true` included
+  # (measured, z/ci-boolinput-probe run 30590), so as booleans these
+  # gates could never be turned on and every opt-in below was a silent
+  # no-op on a green run. Compared against a literal instead.
 on:
   workflow_call:
     inputs:
       artifact-name: { type: string, required: true }   # artifact uploaded by your build job (contains the .app)
       app-name:      { type: string, required: true }    # e.g. App.app
-      make-dmg:      { type: boolean, default: true }
+      make-dmg:      { type: string,  default: 'true' }
       runs-on:       { type: string, default: '["self-hosted","macOS","ARM64"]' }
     secrets:
       CERT_P12_BASE64:       { required: true }
@@ -56,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           NAME="$(basename "${{ inputs.app-name }}" .app)"
-          if ${{ inputs.make-dmg }}; then
+          if ${{ inputs.make-dmg != 'false' }}; then
             hdiutil create -volname "$NAME" -srcfolder "$APP" -ov -format UDZO "$RUNNER_TEMP/$NAME.dmg"
             echo "ARTIFACT=$RUNNER_TEMP/$NAME.dmg" >> "$GITHUB_ENV"
           else
