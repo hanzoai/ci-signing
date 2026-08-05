@@ -2,13 +2,18 @@ name: publish-chrome
 # Reusable, PUBLISH-ONLY: upload a prebuilt extension .zip to the Chrome Web Store.
 # The SAME package works on all Chromium stores (Edge/Brave/Opera). Google packages + signs it on
 # publish — you don't code-sign extensions. Runs on Linux.
+  # STRING, NOT BOOLEAN: git.hanzo.ai resolves every `type: boolean`
+  # workflow_call input to false, an explicitly passed `true` included
+  # (measured, z/ci-boolinput-probe run 30590), so as booleans these
+  # gates could never be turned on and every opt-in below was a silent
+  # no-op on a green run. Compared against a literal instead.
 on:
   workflow_call:
     inputs:
       artifact-name: { type: string,  required: true }    # build job's uploaded .zip
       zip-name:      { type: string,  default: 'extension.zip' }
       extension-id:  { type: string,  required: true }
-      publish:       { type: boolean, default: true }      # false = upload as draft only
+      publish:       { type: string,  default: 'true' }    # 'false' = upload as draft only
       runs-on:       { type: string,  default: '["self-hosted","Linux","X64"]' }
     secrets:
       CHROME_CLIENT_ID:     { required: true }
@@ -30,4 +35,4 @@ jobs:
           client-id:     ${{ secrets.CHROME_CLIENT_ID }}
           client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
           refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
-          publish:       ${{ inputs.publish }}
+          publish:       ${{ inputs.publish != 'false' }}

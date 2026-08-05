@@ -2,12 +2,17 @@ name: sign-android
 # Reusable, SIGN-ONLY: sign a prebuilt UNSIGNED .aab/.apk (from your build job's artifact) with your
 # upload keystore, optional Play upload. Your Gradle build runs in the app repo; this only signs.
 # (Keystore = your UPLOAD key; Play App Signing re-signs with the app key Google holds.)
+  # STRING, NOT BOOLEAN: git.hanzo.ai resolves every `type: boolean`
+  # workflow_call input to false, an explicitly passed `true` included
+  # (measured, z/ci-boolinput-probe run 30590), so as booleans these
+  # gates could never be turned on and every opt-in below was a silent
+  # no-op on a green run. Compared against a literal instead.
 on:
   workflow_call:
     inputs:
       artifact-name: { type: string,  required: true }     # build job's uploaded unsigned artifact
       file-glob:     { type: string,  default: '*.aab' }    # *.aab (jarsigner) or *.apk (apksigner)
-      upload-play:   { type: boolean, default: false }
+      upload-play:   { type: string,  default: 'false' }
       package-name:  { type: string,  default: '' }
       track:         { type: string,  default: 'internal' }
       runs-on:       { type: string,  default: '["self-hosted","Linux","X64"]' }
@@ -53,7 +58,7 @@ jobs:
           done
 
       - name: Upload to Google Play
-        if: ${{ inputs.upload-play }}
+        if: ${{ inputs.upload-play == 'true' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
